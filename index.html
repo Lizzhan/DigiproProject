@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Shanshui Plus</title>
+<script src="prng.js"></script>      <!-- Math.random: fixed start, 1234 -->
+<script src="noise.js"></script>     <!-- Perlin noise -->
+<script src="paper.js"></script>     <!-- makePaper() -->
+<script src="brush.js"></script>     <!-- poly(), stroke(): ink and brush -->
+<script src="audio.js"></script>     <!-- AudioClip: load and decode a clip -->
+<script src="fft.js"></script>       <!-- FFT library -->
+<script src="spectrum.js"></script>  <!-- magnitudeSpectrum(): DFT of the clip -->
+<script src="clipseed.js"></script>  <!-- seedFromClip(): strongest bin as seed -->
+<script src="row.js"></script>       <!-- one mountain, one row -->
+</head>
+<body style="margin:0">
+  <!-- Controls: choose a clip, and where the row's values come from. -->
+  <div style="position:fixed; top:10px; left:10px; z-index:1; font:13px monospace">
+    <input type="file" id="INP_AUDIO" accept="audio/*" />
+    <select id="INP_DOMAIN">
+      <option value="time">time domain</option>
+      <option value="frequency">frequency domain</option>
+    </select>
+    <span id="STATUS"></span>
+  </div>
+
+  <!-- The painting: paper as the background, ink as an SVG multiplied onto it.
+       The painting is 1000 x 500 units, scaled to fit the window. -->
+  <div id="BG" style="width:100%; height:100vh">
+    <svg id="SVG" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%"
+         viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet"
+         style="mix-blend-mode:multiply; display:block"></svg>
+  </div>
+
+  <canvas id="bgcanv" width="512" height="512" hidden></canvas>
+  <script>
+    // Paper first, from the fixed start (1234), before any clip is loaded.
+    var img = makePaper();
+    document.getElementById("BG").style.backgroundImage = "url(" + img + ")";
+    document.body.style.backgroundImage = "url(" + img + ")";
+
+    var clip = null;   // the loaded clip
+    var x = null;      // its samples, normalized to -1..1
+    var spec = null;   // its DFT magnitudes
+
+    // Seed from the clip, sample the row, and draw the mountain.
+    function draw() {
+      if (!x) return;
+      var seed = seedFromClip(spec, clip.sampleRate);   // strongest bin -> Prng, noise
+      var domain = document.getElementById("INP_DOMAIN").value;
+      var values = domain === "time"
+        ? rowValuesTime(x, ROW_POINTS - 2)                                // 48 slices
+        : rowValuesFrequency(spec, clip.sampleRate, ROW_POINTS - 2, 20, -80); // 48 frequencies
+      var heights = rowHeights(values);                 // 50 values + Perlin bumps
+      document.getElementById("SVG").innerHTML =
+        drawMountain(heights, 500, 420, 600, 300);      // centred, base at y 420
+      document.getElementById("STATUS").textContent =
+        clip.seconds.toFixed(2) + " s, seed: bin " + seed.bin +
+        " (" + seed.freq.toFixed(1) + " Hz)";
+    }
+
+    // Load the chosen clip: decode, normalize, DFT. Then draw.
+    document.getElementById("INP_AUDIO").addEventListener("change", function (e) {
+      var file = e.target.files[0];
+      if (!file) return;
+      document.getElementById("STATUS").textContent = "Loading...";
+      AudioClip.load(file).then(function (c) {
+        clip = c;
+        x = AudioClip.normalize(c.samples);   // loudest sample = 1
+        spec = magnitudeSpectrum(x);          // |X[m]| for every bin
+        draw();
+      }).catch(function (err) {
+        document.getElementById("STATUS").textContent = err.message;
+      });
+    });
+
+    // Switching domain redraws; seeding again first keeps it repeatable.
+    document.getElementById("INP_DOMAIN").addEventListener("change", draw);
+  </script>
+</body>
+</html>
